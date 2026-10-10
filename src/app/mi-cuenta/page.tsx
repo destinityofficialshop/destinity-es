@@ -54,13 +54,18 @@ export default function CustomerAccountPage() {
 
   useEffect(() => {
     setCurrentUser(StoreService.getCurrentUser());
-    setOrders(StoreService.getOrders());
+    StoreService.fetchOrders().then(setOrders).catch(() => setOrders(StoreService.getOrders()));
 
     const handleUpdate = () => {
       setOrders(StoreService.getOrders());
+      setCurrentUser(StoreService.getCurrentUser());
     };
     window.addEventListener('destinity_orders_updated', handleUpdate);
-    return () => window.removeEventListener('destinity_orders_updated', handleUpdate);
+    window.addEventListener('destinity_user_changed', handleUpdate);
+    return () => {
+      window.removeEventListener('destinity_orders_updated', handleUpdate);
+      window.removeEventListener('destinity_user_changed', handleUpdate);
+    };
   }, []);
 
   const handleAddAddress = (e: React.FormEvent) => {

@@ -18,6 +18,7 @@ import {
   Image as ImageIcon,
   Tag,
   FolderPlus,
+  Loader2,
 } from 'lucide-react';
 
 interface ProductFormProps {
@@ -72,11 +73,15 @@ export function ProductForm({ initialProduct }: ProductFormProps) {
 
   // UI state
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
 
   useEffect(() => {
-    setCategories(StoreService.getCategories());
+    StoreService.fetchCategories().then((cats) => setCategories(cats)).catch(() => {
+      setCategories(StoreService.getCategories());
+    });
   }, []);
 
   // Auto-slug generator
@@ -96,14 +101,19 @@ export function ProductForm({ initialProduct }: ProductFormProps) {
   };
 
   // Add category on the fly
-  const handleCreateCategory = (e: React.FormEvent) => {
+  const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
-    const cat = StoreService.saveCategory({ name: newCategoryName.trim() });
-    setCategories(StoreService.getCategories());
-    setCategoryId(cat.id);
-    setNewCategoryName('');
-    setShowAddCatModal(false);
+    try {
+      const cat = await StoreService.saveCategory({ name: newCategoryName.trim() });
+      const refreshed = await StoreService.fetchCategories();
+      setCategories(refreshed);
+      setCategoryId(cat.id);
+      setNewCategoryName('');
+      setShowAddCatModal(false);
+    } catch (err) {
+      console.error('Error creating category:', err);
+    }
   };
 
   // Tag management
@@ -148,20 +158,69 @@ export function ProductForm({ initialProduct }: ProductFormProps) {
     setVariants(variants.filter((_, idx) => idx !== groupIndex));
   };
 
-  // Drag & drop image simulation (or image URL add)
-  const handleDrop = (e: React.DragEvent) => {
+  // Real Drag & drop and file input connected to Supabase Storage
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragActive(false);
-    // In browser client with Supabase storage, we would upload to bucket 'product-images'
-    // Here we support drop simulation with high-res curated photos
-    const demoPhotos = [
-      'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?auto=format&fit=crop&w=1000&q=85',
-      'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=85',
-      'https://images.unsplash.com/photo-1616949755610-8c9bbc08f138?auto=format&fit=crop&w=1000&q=85',
-      'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1000&q=85',
-    ];
-    const picked = demoPhotos[Math.floor(Math.random() * demoPhotos.length)];
-    setGalleryImages([...galleryImages, picked]);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+    if (files.length > 0) {
+      setUploading(true);
+      try {
+        const uploadedUrls: string[] = [];
+        for (const file of files) {
+          const url = await StoreService.uploadImage(file);
+          if (url) uploadedUrls.push(url);
+        }
+        if (uploadedUrls.length > 0) {
+          if (!featuredImage || featuredImage.includes('unsplash.com/photo-1539571696357')) {
+            setFeaturedImage(uploadedUrls[0]);
+            setGalleryImages((prev) => [...prev, ...uploadedUrls.slice(1)]);
+          } else {
+            setGalleryImages((prev) => [...prev, ...uploadedUrls]);
+          }
+        }
+      } catch (err) {
+        console.error('Error al subir imágenes:', err);
+      } finally {
+        setUploading(false);
+      }
+    }
+  };
+
+  const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of files) {
+        const url = await StoreService.uploadImage(file);
+        if (url) uploadedUrls.push(url);
+      }
+      if (uploadedUrls.length > 0) {
+        if (!featuredImage || featuredImage.includes('unsplash.com/photo-1539571696357')) {
+          setFeaturedImage(uploadedUrls[0]);
+          setGalleryImages((prev) => [...prev, ...uploadedUrls.slice(1)]);
+        } else {
+          setGalleryImages((prev) => [...prev, ...uploadedUrls]);
+        }
+      }
+    } catch (err) {
+      console.error('Error al subir archivos:', err);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAddImageUrl = () => {
+    if (!urlInput.trim()) return;
+    if (!featuredImage) {
+      setFeaturedImage(urlInput.trim());
+    } else {
+      setGalleryImages((prev) => [...prev, urlInput.trim()]);
+    }
+    setUrlInput('');
   };
 
   const handleAddAttribute = () => {
@@ -178,8 +237,8 @@ export function ProductForm({ initialProduct }: ProductFormProps) {
     setAttributes(copy);
   };
 
-  // Save product
-  const handleSubmit = (e: React.FormEvent) => {
+  // Save product with Supabase live persistence
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !price || !featuredImage) {
       alert('Por favor completa el título, precio y la imagen destacada.');
@@ -187,29 +246,35 @@ export function ProductForm({ initialProduct }: ProductFormProps) {
     }
 
     setSaving(true);
-    const saved = StoreService.saveProduct({
-      id: initialProduct?.id,
-      title,
-      slug,
-      description,
-      price: parseFloat(price),
-      sale_price: salePrice ? parseFloat(salePrice) : null,
-      sku: sku || `DES-${Math.floor(1000 + Math.random() * 9000)}`,
-      stock: parseInt(stock) || 0,
-      is_published: isPublished,
-      category_id: categoryId || null,
-      featured_image: featuredImage,
-      gallery_images: galleryImages,
-      tags,
-      variants,
-      attributes,
-    });
+    try {
+      await StoreService.saveProduct({
+        id: initialProduct?.id,
+        title,
+        slug,
+        description,
+        price: parseFloat(price),
+        sale_price: salePrice ? parseFloat(salePrice) : null,
+        sku: sku || `DES-${Math.floor(1000 + Math.random() * 9000)}`,
+        stock: parseInt(stock) || 0,
+        is_published: isPublished,
+        category_id: categoryId || null,
+        featured_image: featuredImage,
+        gallery_images: galleryImages,
+        tags,
+        variants,
+        attributes,
+      });
 
-    setSaving(false);
-    setSuccessMessage('¡Producto guardado y sincronizado con éxito!');
-    setTimeout(() => {
-      router.push('/admin/productos');
-    }, 1200);
+      setSuccessMessage('¡Producto guardado y sincronizado con éxito!');
+      setTimeout(() => {
+        router.push('/admin/productos');
+      }, 1000);
+    } catch (err) {
+      console.error('Error guardando producto:', err);
+      alert('Hubo un error al guardar el producto.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -662,19 +727,60 @@ export function ProductForm({ initialProduct }: ProductFormProps) {
               }}
               onDragLeave={() => setDragActive(false)}
               onDrop={handleDrop}
-              className={`p-6 border-2 border-dashed rounded-2xl text-center transition-colors cursor-pointer ${
+              className={`p-6 border-2 border-dashed rounded-2xl text-center transition-colors relative ${
                 dragActive
                   ? 'border-brand-500 bg-brand-50/50'
                   : 'border-black/10 bg-[#fafaf9] hover:border-brand-400'
               }`}
             >
-              <UploadCloud className="w-8 h-8 text-brand-500 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-obsidian-900">
-                Arrastra fotos de producto aquí
-              </p>
-              <p className="text-[10px] text-obsidian-400 mt-1">
-                Conectado directamente a Supabase Storage con RLS
-              </p>
+              {uploading ? (
+                <div className="py-2 flex flex-col items-center justify-center gap-2">
+                  <Loader2 className="w-8 h-8 text-brand-600 animate-spin" />
+                  <p className="text-xs font-bold text-obsidian-900">Subiendo a Supabase Storage...</p>
+                  <p className="text-[10px] text-obsidian-500">bucket: product-images</p>
+                </div>
+              ) : (
+                <>
+                  <UploadCloud className="w-8 h-8 text-brand-500 mx-auto mb-2" />
+                  <p className="text-xs font-semibold text-obsidian-900">
+                    Arrastra fotos o{' '}
+                    <label className="text-brand-600 font-bold underline cursor-pointer hover:text-brand-700">
+                      selecciona archivos
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={handleFileInput}
+                        className="hidden"
+                      />
+                    </label>
+                  </p>
+                  <p className="text-[10px] text-obsidian-400 mt-1">
+                    PNG, JPG, WebP hasta 10MB con CDN instantánea
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Manual Image URL Adder */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[11px] text-obsidian-500 block">O añade enlace directo:</span>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  placeholder="https://images.unsplash.com/..."
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  className="flex-1 bg-[#fafaf9] border border-black/10 rounded-xl px-3 py-1.5 text-xs text-obsidian-900 focus:outline-none focus:border-brand-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddImageUrl}
+                  className="px-3 py-1.5 bg-obsidian-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-colors"
+                >
+                  Añadir
+                </button>
+              </div>
             </div>
 
             {/* Gallery Thumbnails */}

@@ -29,7 +29,7 @@ export default function AdminOrdersPage() {
   const [emailStatusMsg, setEmailStatusMsg] = useState('');
 
   useEffect(() => {
-    setOrders(StoreService.getOrders());
+    StoreService.fetchOrders().then(setOrders).catch(() => setOrders(StoreService.getOrders()));
     const handleUpdate = () => {
       setOrders(StoreService.getOrders());
     };
@@ -37,8 +37,8 @@ export default function AdminOrdersPage() {
     return () => window.removeEventListener('destinity_orders_updated', handleUpdate);
   }, []);
 
-  const handleUpdateStatus = (orderId: string, newStatus: OrderStatus) => {
-    const updated = StoreService.updateOrderStatus(orderId, newStatus);
+  const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
+    const updated = await StoreService.updateOrderStatus(orderId, newStatus);
     if (updated) {
       setOrders(StoreService.getOrders());
       if (selectedOrder && selectedOrder.id === orderId) {

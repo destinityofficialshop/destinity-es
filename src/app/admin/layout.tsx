@@ -18,6 +18,7 @@ import {
   Search,
   Store,
   FileText,
+  Layers,
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -33,6 +34,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: '/admin', label: 'Panel Dashboard', icon: LayoutDashboard },
     { href: '/admin/productos', label: 'Gestión de Productos', icon: Package },
     { href: '/admin/productos/nuevo', label: 'Añadir Producto', icon: PlusCircle },
+    { href: '/admin/categorias', label: 'Categorías & Colecciones', icon: Layers },
     { href: '/admin/pedidos', label: 'Pedidos y Facturación', icon: ShoppingBag },
     { href: '/admin/ajustes', label: 'Configuración Fiscal & Tienda', icon: Settings },
   ];

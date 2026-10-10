@@ -20,8 +20,19 @@ function CatalogContent() {
   const [onlyInStock, setOnlyInStock] = useState(false);
 
   useEffect(() => {
-    setProducts(StoreService.getProducts());
-    setCategories(StoreService.getCategories());
+    StoreService.fetchProducts().then(setProducts).catch(() => setProducts(StoreService.getProducts()));
+    StoreService.fetchCategories().then(setCategories).catch(() => setCategories(StoreService.getCategories()));
+
+    const handleUpdate = () => {
+      setProducts(StoreService.getProducts());
+      setCategories(StoreService.getCategories());
+    };
+    window.addEventListener('destinity_products_updated', handleUpdate);
+    window.addEventListener('destinity_categories_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('destinity_products_updated', handleUpdate);
+      window.removeEventListener('destinity_categories_updated', handleUpdate);
+    };
   }, []);
 
   useEffect(() => {

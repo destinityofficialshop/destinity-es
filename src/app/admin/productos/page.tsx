@@ -23,27 +23,32 @@ export default function AdminProductsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
 
   useEffect(() => {
-    setProducts(StoreService.getProducts());
-    setCategories(StoreService.getCategories());
+    StoreService.fetchProducts().then(setProducts).catch(() => setProducts(StoreService.getProducts()));
+    StoreService.fetchCategories().then(setCategories).catch(() => setCategories(StoreService.getCategories()));
 
     const handleUpdate = () => {
       setProducts(StoreService.getProducts());
+      setCategories(StoreService.getCategories());
     };
     window.addEventListener('destinity_products_updated', handleUpdate);
-    return () => window.removeEventListener('destinity_products_updated', handleUpdate);
+    window.addEventListener('destinity_categories_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('destinity_products_updated', handleUpdate);
+      window.removeEventListener('destinity_categories_updated', handleUpdate);
+    };
   }, []);
 
-  const handleToggleStatus = (product: Product) => {
-    StoreService.saveProduct({
+  const handleToggleStatus = async (product: Product) => {
+    await StoreService.saveProduct({
       ...product,
       is_published: !product.is_published,
     });
     setProducts(StoreService.getProducts());
   };
 
-  const handleDelete = (id: string, title: string) => {
+  const handleDelete = async (id: string, title: string) => {
     if (confirm(`¿Estás seguro de que deseas eliminar permanentemente el producto "${title}"?`)) {
-      StoreService.deleteProduct(id);
+      await StoreService.deleteProduct(id);
       setProducts(StoreService.getProducts());
     }
   };

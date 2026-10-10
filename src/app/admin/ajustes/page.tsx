@@ -11,7 +11,7 @@ export default function AdminSettingsPage() {
   const [savedMessage, setSavedMessage] = useState('');
 
   useEffect(() => {
-    setSettings(StoreService.getSettings());
+    StoreService.fetchSettings().then(setSettings).catch(() => setSettings(StoreService.getSettings()));
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -24,14 +24,19 @@ export default function AdminSettingsPage() {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    const updated = StoreService.saveSettings(settings);
-    setSettings(updated);
-    setSaving(false);
-    setSavedMessage('Configuración fiscal y de tienda actualizada con éxito.');
-    setTimeout(() => setSavedMessage(''), 3000);
+    try {
+      const updated = await StoreService.saveSettings(settings);
+      setSettings(updated);
+      setSavedMessage('Configuración fiscal y de tienda actualizada con éxito.');
+      setTimeout(() => setSavedMessage(''), 3000);
+    } catch (err) {
+      console.error('Error saving settings:', err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
