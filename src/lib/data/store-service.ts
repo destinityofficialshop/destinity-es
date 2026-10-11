@@ -533,8 +533,26 @@ export const StoreService = {
   setCurrentUser(profile: Profile) {
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(profile));
-      document.cookie = `destinity_demo_role=${profile.role}; path=/; max-age=86400`;
+      document.cookie = `destinity_demo_role=${profile.role}; path=/; max-age=86400; SameSite=Lax`;
+      document.cookie = `destinity_user_email=${encodeURIComponent(profile.email)}; path=/; max-age=86400; SameSite=Lax`;
+      document.cookie = `destinity_user_id=${profile.id}; path=/; max-age=86400; SameSite=Lax`;
       window.dispatchEvent(new Event('destinity_user_changed'));
+    }
+  },
+
+  async logout(): Promise<void> {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      document.cookie = 'destinity_demo_role=; path=/; max-age=0; SameSite=Lax';
+      document.cookie = 'destinity_user_email=; path=/; max-age=0; SameSite=Lax';
+      document.cookie = 'destinity_user_id=; path=/; max-age=0; SameSite=Lax';
+      window.dispatchEvent(new Event('destinity_user_changed'));
+    }
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('Supabase sign out warning:', err);
     }
   },
 };

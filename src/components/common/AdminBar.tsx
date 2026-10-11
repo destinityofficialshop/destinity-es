@@ -29,8 +29,14 @@ export function AdminBar() {
   const toggleRole = () => {
     if (isAdmin) {
       StoreService.setCurrentUser(DEMO_CUSTOMER_USER);
+      if (pathname.startsWith('/admin')) {
+        window.location.href = '/';
+      } else {
+        window.location.reload();
+      }
     } else {
       StoreService.setCurrentUser(DEMO_ADMIN_USER);
+      window.location.reload();
     }
   };
 

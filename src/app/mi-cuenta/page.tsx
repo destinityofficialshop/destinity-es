@@ -19,6 +19,7 @@ import {
   Truck,
   Shield,
   FileText,
+  LogOut,
 } from 'lucide-react';
 
 export default function CustomerAccountPage() {
@@ -90,6 +91,11 @@ export default function CustomerAccountPage() {
     setAddresses(addresses.filter((_, i) => i !== index));
   };
 
+  const handleLogout = async () => {
+    await StoreService.logout();
+    window.location.href = '/login';
+  };
+
   const getStatusBadge = (status: Order['order_status']) => {
     switch (status) {
       case 'completed':
@@ -145,15 +151,25 @@ export default function CustomerAccountPage() {
               </div>
             </div>
 
-            {currentUser.role === 'admin' && (
-              <Link
-                href="/admin"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-obsidian-950 hover:bg-brand-600 text-white text-xs font-semibold tracking-wide transition-colors"
+            <div className="flex items-center gap-3">
+              {currentUser.role === 'admin' && (
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-obsidian-950 hover:bg-brand-600 text-white text-xs font-semibold tracking-wide transition-colors"
+                >
+                  Acceder a CMS
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </Link>
+              )}
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-black/10 bg-white hover:bg-rose-50 hover:border-rose-200 text-obsidian-700 hover:text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
+                title="Cerrar sesión"
               >
-                Acceder al Panel Back-Office
-                <ExternalLink className="w-3.5 h-3.5" />
-              </Link>
-            )}
+                <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                <span>Cerrar Sesión</span>
+              </button>
+            </div>
           </div>
 
           {/* Navigation Tabs */}
@@ -470,12 +486,20 @@ export default function CustomerAccountPage() {
                   </div>
                 </div>
 
-                <div className="pt-2">
+                <div className="pt-2 flex items-center gap-3">
                   <button
                     type="button"
-                    className="px-6 py-2.5 rounded-xl bg-obsidian-950 hover:bg-brand-600 text-white font-semibold text-xs transition-colors"
+                    className="px-6 py-2.5 rounded-xl bg-obsidian-950 hover:bg-brand-600 text-white font-semibold text-xs transition-colors cursor-pointer"
                   >
                     Guardar Cambios
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="px-6 py-2.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    Cerrar Sesión
                   </button>
                 </div>
               </div>

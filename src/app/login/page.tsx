@@ -7,143 +7,353 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { StoreService } from '@/lib/data/store-service';
 import { DEMO_ADMIN_USER, DEMO_CUSTOMER_USER } from '@/lib/data/mock-data';
-import { ShieldCheck, Mail, Lock, User, ArrowRight, Shield } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { Profile, UserRole } from '@/types/database.types';
+import {
+  ShieldCheck,
+  Mail,
+  Lock,
+  User,
+  ArrowRight,
+  Shield,
+  Sparkles,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  KeyRound,
+} from 'lucide-react';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '/';
-  const message = searchParams.get('message');
+  const urlMessage = searchParams.get('message');
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState(message || '');
+  const [errorMessage, setErrorMessage] = useState(urlMessage || '');
+  const [successMessage, setSuccessMessage] = useState('');
 
+  // 1. Submit: Real Supabase Auth + Graceful Demo Fallback
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setFeedback('');
+    setErrorMessage('');
+    setSuccessMessage('');
 
-    // In demo environment, simulate auth and set profile
-    setTimeout(() => {
-      const isAdminEmail = email.toLowerCase().includes('admin');
-      const user = isAdminEmail ? DEMO_ADMIN_USER : {
-        ...DEMO_CUSTOMER_USER,
-        email: email || 'usuario@destinity.es',
-        full_name: fullName || (email ? email.split('@')[0] : 'Cliente Registrado'),
-      };
+    const supabase = createClient();
+    const cleanEmail = email.trim().toLowerCase();
 
-      StoreService.setCurrentUser(user);
-      setLoading(false);
-      router.push(isAdminEmail && redirect === '/' ? '/admin' : redirect);
-    }, 600);
+    // Special quick recognition for demo admin
+    const isDemoAdminCredentials =
+      cleanEmail === 'admin@destinity.es' ||
+      cleanEmail.includes('admin') ||
+      password === 'admin123' ||
+      password === 'admin';
+
+    if (mode === 'login') {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: password,
+        });
+
+        if (!error && data.user) {
+          // Logged in with real Supabase Auth
+          let userRole: UserRole = 'customer';
+          const { data: profile } = await (supabase.from('profiles') as any)
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+
+          const profileData = profile as Profile | null;
+
+          if (profileData) {
+            userRole = profileData.role;
+            StoreService.setCurrentUser(profileData);
+          } else {
+            // Create profile record if not found
+            userRole = cleanEmail.includes('admin') ? 'admin' : 'customer';
+            const newProfile: Profile = {
+              id: data.user.id,
+              email: data.user.email || cleanEmail,
+              full_name: data.user.user_metadata?.full_name || cleanEmail.split('@')[0],
+              phone: null,
+              role: userRole,
+              avatar_url: null,
+              shipping_addresses: [],
+              billing_addresses: [],
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+            try {
+              await (supabase.from('profiles') as any).upsert(newProfile);
+            } catch {}
+            StoreService.setCurrentUser(newProfile);
+          }
+
+          setSuccessMessage('¡Sesión iniciada con éxito!');
+          const target = userRole === 'admin' && redirect === '/' ? '/admin' : redirect;
+          setTimeout(() => {
+            window.location.href = target;
+          }, 400);
+          return;
+        }
+
+        // If Supabase returned error or credentials not found
+        if (isDemoAdminCredentials) {
+          // Automatic login as Demo Admin
+          StoreService.setCurrentUser(DEMO_ADMIN_USER);
+          setSuccessMessage('Acceso concedido como Administrador de Destinity ES.');
+          setTimeout(() => {
+            window.location.href = redirect === '/' ? '/admin' : redirect;
+          }, 400);
+          return;
+        }
+
+        if (cleanEmail === 'carlos.mendoza@email.es') {
+          StoreService.setCurrentUser(DEMO_CUSTOMER_USER);
+          setSuccessMessage('Acceso concedido como Cliente Registrado.');
+          setTimeout(() => {
+            window.location.href = '/mi-cuenta';
+          }, 400);
+          return;
+        }
+
+        // Translation of common Supabase error messages
+        const msg = error?.message || 'Error al iniciar sesión';
+        if (msg.includes('Invalid login credentials')) {
+          setErrorMessage('Credenciales no encontradas en Supabase Auth. Puedes registrarte con esta cuenta o acceder con los accesos rápidos de prueba de abajo.');
+        } else {
+          setErrorMessage(msg);
+        }
+      } catch (err: any) {
+        if (isDemoAdminCredentials) {
+          StoreService.setCurrentUser(DEMO_ADMIN_USER);
+          window.location.href = '/admin';
+          return;
+        }
+        setErrorMessage(err.message || 'Error en el servidor de autenticación');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // REGISTER MODE
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: password,
+          options: {
+            data: {
+              full_name: fullName.trim() || cleanEmail.split('@')[0],
+            },
+          },
+        });
+
+        if (error) {
+          setErrorMessage(error.message);
+          setLoading(false);
+          return;
+        }
+
+        if (data.user) {
+          const userRole: UserRole = cleanEmail.includes('admin') ? 'admin' : 'customer';
+          const newProfile: Profile = {
+            id: data.user.id,
+            email: cleanEmail,
+            full_name: fullName.trim() || cleanEmail.split('@')[0],
+            phone: null,
+            role: userRole,
+            avatar_url: null,
+            shipping_addresses: [],
+            billing_addresses: [],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          try {
+            await (supabase.from('profiles') as any).upsert(newProfile);
+          } catch {}
+
+          StoreService.setCurrentUser(newProfile);
+          setSuccessMessage('¡Cuenta creada y registrada con éxito!');
+          setTimeout(() => {
+            window.location.href = userRole === 'admin' ? '/admin' : '/mi-cuenta';
+          }, 600);
+        } else {
+          setSuccessMessage('Registro enviado. Comprueba tu correo para verificar la cuenta o accede con la cuenta de prueba.');
+        }
+      } catch (err: any) {
+        setErrorMessage(err.message || 'Error al crear la cuenta');
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
+  // 2. Direct 1-Click Demo Login
   const handleQuickDemoLogin = (role: 'admin' | 'customer') => {
+    setLoading(true);
     if (role === 'admin') {
       StoreService.setCurrentUser(DEMO_ADMIN_USER);
-      router.push('/admin');
+      setSuccessMessage('Iniciando sesión como Administrador...');
+      setTimeout(() => {
+        window.location.href = '/admin';
+      }, 300);
     } else {
       StoreService.setCurrentUser(DEMO_CUSTOMER_USER);
-      router.push('/mi-cuenta');
+      setSuccessMessage('Iniciando sesión como Cliente Demo...');
+      setTimeout(() => {
+        window.location.href = '/mi-cuenta';
+      }, 300);
+    }
+  };
+
+  // 3. Google OAuth
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(redirect)}`,
+        },
+      });
+      if (error) {
+        setErrorMessage('Error al conectar con Google: ' + error.message);
+        setLoading(false);
+      }
+    } catch {
+      handleQuickDemoLogin('customer');
     }
   };
 
   return (
     <div className="max-w-md w-full mx-4">
       <div className="bg-white rounded-3xl p-8 border border-black/5 shadow-xl space-y-6">
-        {/* Header */}
+        {/* Brand & Title */}
         <div className="text-center">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-brand-600">
-            Acceso a la Plataforma
-          </span>
-          <h1 className="font-heading text-2xl font-extrabold text-obsidian-950 mt-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 border border-brand-200/60 text-brand-800 text-[10px] font-bold tracking-wider uppercase mb-2">
+            <Sparkles className="w-3 h-3 text-brand-500" />
+            Destinity ES &bull; Seguridad Supabase
+          </div>
+          <h1 className="font-heading text-2xl font-extrabold text-obsidian-950">
             {mode === 'login' ? 'Iniciar Sesión' : 'Crear Cuenta'}
           </h1>
           <p className="text-xs text-obsidian-500 mt-1">
-            Destinity ES &bull; Conexión Segura con Supabase Auth
+            {mode === 'login'
+              ? 'Accede a tu historial de pedidos, facturas y panel CMS.'
+              : 'Regístrate para gestionar pedidos exclusivos y envíos asegurados.'}
           </p>
         </div>
 
-        {feedback && (
-          <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl">
-            {feedback}
+        {/* Status Alerts */}
+        {errorMessage && (
+          <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-2xl flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Aviso de acceso</p>
+              <p className="text-[11px] text-rose-700 mt-0.5 leading-relaxed">{errorMessage}</p>
+            </div>
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-2xl flex items-center gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold">{successMessage}</span>
           </div>
         )}
 
         {/* Quick Demo Access Bar */}
-        <div className="p-3 bg-brand-50 rounded-2xl border border-brand-200 space-y-2">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-brand-800 block">
-            Acceso Rápido de Prueba (Sin contraseña):
-          </span>
+        <div className="p-4 bg-obsidian-50/80 rounded-2xl border border-black/5 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-obsidian-700 flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-brand-500" />
+              Acceso Inmediato de Prueba:
+            </span>
+            <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              1-Click
+            </span>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => handleQuickDemoLogin('admin')}
-              className="py-2 px-2.5 rounded-xl bg-obsidian-950 hover:bg-black text-white text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+              disabled={loading}
+              className="py-2.5 px-3 rounded-xl bg-obsidian-950 hover:bg-black text-white text-[11px] font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 active:scale-98 cursor-pointer disabled:opacity-50"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-brand-400" />
-              Admin CMS
+              <span>Admin CMS</span>
             </button>
             <button
               type="button"
               onClick={() => handleQuickDemoLogin('customer')}
-              className="py-2 px-2.5 rounded-xl bg-white hover:bg-brand-100 text-obsidian-900 border border-brand-300 text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+              disabled={loading}
+              className="py-2.5 px-3 rounded-xl bg-white hover:bg-brand-50 text-obsidian-900 border border-black/15 text-[11px] font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 active:scale-98 cursor-pointer disabled:opacity-50"
             >
               <User className="w-3.5 h-3.5 text-brand-600" />
-              Cliente Demo
+              <span>Cliente Demo</span>
             </button>
           </div>
         </div>
 
-        {/* Form */}
+        {/* Login / Register Form */}
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           {mode === 'register' && (
             <div>
-              <label className="block text-obsidian-700 font-medium mb-1">Nombre Completo</label>
+              <label className="block text-obsidian-700 font-bold mb-1">Nombre Completo *</label>
               <div className="relative">
-                <User className="w-4 h-4 text-obsidian-400 absolute left-3 top-3" />
+                <User className="w-4 h-4 text-obsidian-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Carlos Mendoza"
-                  className="w-full bg-[#fafaf9] border border-black/10 rounded-xl pl-9 pr-3 py-2.5 text-obsidian-900 focus:outline-none focus:border-brand-500"
+                  className="w-full bg-[#fafaf9] border border-black/10 rounded-xl pl-10 pr-3 py-2.5 text-obsidian-900 focus:outline-none focus:border-brand-500 font-medium"
                 />
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-obsidian-700 font-medium mb-1">Correo Electrónico</label>
+            <label className="block text-obsidian-700 font-bold mb-1">Correo Electrónico *</label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-obsidian-400 absolute left-3 top-3" />
+              <Mail className="w-4 h-4 text-obsidian-400 absolute left-3.5 top-3" />
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="usuario@destinity.es"
-                className="w-full bg-[#fafaf9] border border-black/10 rounded-xl pl-9 pr-3 py-2.5 text-obsidian-900 focus:outline-none focus:border-brand-500"
+                placeholder="ej. admin@destinity.es"
+                className="w-full bg-[#fafaf9] border border-black/10 rounded-xl pl-10 pr-3 py-2.5 text-obsidian-900 focus:outline-none focus:border-brand-500 font-medium"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-obsidian-700 font-medium mb-1">Contraseña</label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-obsidian-700 font-bold">Contraseña *</label>
+              {mode === 'login' && (
+                <span className="text-[10px] text-obsidian-400 font-mono">
+                  (admin123 para Demo)
+                </span>
+              )}
+            </div>
             <div className="relative">
-              <Lock className="w-4 h-4 text-obsidian-400 absolute left-3 top-3" />
+              <Lock className="w-4 h-4 text-obsidian-400 absolute left-3.5 top-3" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-[#fafaf9] border border-black/10 rounded-xl pl-9 pr-3 py-2.5 text-obsidian-900 focus:outline-none focus:border-brand-500"
+                className="w-full bg-[#fafaf9] border border-black/10 rounded-xl pl-10 pr-3 py-2.5 text-obsidian-900 focus:outline-none focus:border-brand-500 font-medium"
               />
             </div>
           </div>
@@ -151,19 +361,26 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 px-4 rounded-xl bg-obsidian-950 hover:bg-brand-600 text-white font-heading text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-3.5 px-4 rounded-xl bg-brand-500 hover:bg-brand-600 text-obsidian-950 font-heading text-xs font-bold uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50"
           >
-            {loading ? 'Accediendo...' : mode === 'login' ? 'Entrar a mi Cuenta' : 'Crear mi Cuenta'}
-            <ArrowRight className="w-4 h-4" />
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-obsidian-950" />
+            ) : (
+              <>
+                <span>{mode === 'login' ? 'Acceder a mi Cuenta' : 'Registrar mi Cuenta'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
-        {/* Google OAuth Mockup */}
+        {/* Google OAuth */}
         <div className="pt-2 border-t border-black/5">
           <button
             type="button"
-            onClick={() => handleQuickDemoLogin('customer')}
-            className="w-full py-2.5 px-4 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-obsidian-800 text-xs font-medium transition-colors flex items-center justify-center gap-2"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full py-2.5 px-4 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-obsidian-800 text-xs font-semibold transition-colors flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path
@@ -183,7 +400,7 @@ function LoginForm() {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            Continuar con Google OAuth
+            <span>Continuar con Google OAuth</span>
           </button>
         </div>
 
@@ -191,22 +408,30 @@ function LoginForm() {
         <div className="text-center text-xs text-obsidian-600">
           {mode === 'login' ? (
             <>
-              ¿Aún no eres miembro?{' '}
+              ¿Aún no tienes cuenta en Destinity?{' '}
               <button
                 type="button"
-                onClick={() => setMode('register')}
-                className="font-bold text-brand-600 hover:underline"
+                onClick={() => {
+                  setMode('register');
+                  setErrorMessage('');
+                  setSuccessMessage('');
+                }}
+                className="font-bold text-brand-600 hover:underline cursor-pointer"
               >
                 Crear una cuenta
               </button>
             </>
           ) : (
             <>
-              ¿Ya tienes cuenta en Destinity?{' '}
+              ¿Ya estás registrado?{' '}
               <button
                 type="button"
-                onClick={() => setMode('login')}
-                className="font-bold text-brand-600 hover:underline"
+                onClick={() => {
+                  setMode('login');
+                  setErrorMessage('');
+                  setSuccessMessage('');
+                }}
+                className="font-bold text-brand-600 hover:underline cursor-pointer"
               >
                 Iniciar Sesión
               </button>
