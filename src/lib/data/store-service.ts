@@ -109,34 +109,29 @@ export const StoreService = {
       window.dispatchEvent(new Event('destinity_products_updated'));
     }
 
-    // 2. Persist to live Supabase
+    // 2. Persist to live Supabase via Admin API Route (bypasses RLS safely)
     try {
-      const supabase = createClient();
-      const payload = {
-        id: product.id,
-        title: product.title,
-        slug: product.slug,
-        description: product.description,
-        price: product.price,
-        sale_price: product.sale_price,
-        sku: product.sku,
-        stock: product.stock,
-        is_published: product.is_published,
-        category_id: product.category_id,
-        featured_image: product.featured_image,
-        gallery_images: product.gallery_images,
-        tags: product.tags,
-        variants: product.variants,
-        attributes: product.attributes,
-        updated_at: product.updated_at,
-      };
-
-      const { data, error } = await (supabase.from('products') as any).upsert(payload).select().single();
-      if (!error && data) {
-        return data as Product;
+      const res = await fetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(product),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data) {
+          const synced = json.data as Product;
+          memoryProducts = memoryProducts.map((p) => (p.id === synced.id ? synced : p));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(memoryProducts));
+          }
+          return synced;
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn('API save product warning:', errJson);
       }
     } catch (err) {
-      console.warn('Supabase upsert product warning:', err);
+      console.warn('Network save product warning, optimistic cache kept:', err);
     }
 
     return product;
@@ -151,10 +146,11 @@ export const StoreService = {
     }
 
     try {
-      const supabase = createClient();
-      await supabase.from('products').delete().eq('id', id);
+      await fetch(`/api/admin/products?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
     } catch (err) {
-      console.warn('Supabase delete product warning:', err);
+      console.warn('API delete product warning:', err);
     }
     return true;
   },
@@ -166,6 +162,17 @@ export const StoreService = {
     const newStock = Math.max(0, target.stock + delta);
     target.stock = newStock;
     this.saveProduct(target);
+
+    try {
+      await fetch('/api/admin/stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, delta }),
+      });
+    } catch (err) {
+      console.warn('API update stock warning:', err);
+    }
+
     return newStock;
   },
 
@@ -231,11 +238,29 @@ export const StoreService = {
       window.dispatchEvent(new Event('destinity_categories_updated'));
     }
 
+    // 2. Persist to live Supabase via Admin API Route (bypasses RLS safely)
     try {
-      const supabase = createClient();
-      await (supabase.from('categories') as any).upsert(category);
+      const res = await fetch('/api/admin/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(category),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data) {
+          const synced = json.data as Category;
+          memoryCategories = memoryCategories.map((c) => (c.id === synced.id ? synced : c));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(memoryCategories));
+          }
+          return synced;
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn('API save category warning:', errJson);
+      }
     } catch (err) {
-      console.warn('Supabase save category error:', err);
+      console.warn('Network save category warning, optimistic cache kept:', err);
     }
 
     return category;
@@ -250,10 +275,11 @@ export const StoreService = {
     }
 
     try {
-      const supabase = createClient();
-      await supabase.from('categories').delete().eq('id', id);
+      await fetch(`/api/admin/categories?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
     } catch (err) {
-      console.warn('Supabase delete category error:', err);
+      console.warn('API delete category warning:', err);
     }
     return true;
   },
@@ -480,10 +506,17 @@ export const StoreService = {
     }
 
     try {
-      const supabase = createClient();
-      await (supabase.from('store_settings') as any).upsert({ ...merged, id: 1 });
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(merged),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data) return json.data as StoreSettings;
+      }
     } catch (err) {
-      console.warn('Supabase save settings error:', err);
+      console.warn('API save settings error:', err);
     }
 
     return merged;
@@ -493,10 +526,25 @@ export const StoreService = {
   // STORAGE: REAL FILE UPLOAD TO SUPABASE BUCKET
   // ==========================================
   async uploadImage(file: File): Promise<string> {
-    const ext = file.name.split('.').pop() || 'jpg';
-    const fileName = `prod_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-
     try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/admin/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.publicUrl) return json.publicUrl;
+      }
+    } catch (err) {
+      console.warn('API admin upload warning, trying direct fallback:', err);
+    }
+
+    // Direct fallback with Supabase browser client
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const fileName = `prod_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
       const supabase = createClient();
       const { data, error } = await supabase.storage.from('product-images').upload(fileName, file, {
         cacheControl: '3600',
@@ -508,10 +556,9 @@ export const StoreService = {
         return publicUrlData.publicUrl;
       }
     } catch (err) {
-      console.warn('Supabase storage upload error, using local object URL fallback:', err);
+      console.warn('Supabase direct upload warning:', err);
     }
 
-    // Fallback: create object URL or base64
     return URL.createObjectURL(file);
   },
 
